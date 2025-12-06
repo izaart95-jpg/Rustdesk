@@ -1,0 +1,211 @@
+name: RustDesk Screenshot macOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rustdesk-screenshot:
+    runs-on: macos-latest
+    timeout-minutes: 360  # 24 hours
+
+    steps:
+      - name: Download RustDesk
+        run: |
+          rustdeskUrl="https://github.com/rustdesk/rustdesk/releases/download/1.4.4/rustdesk-1.4.4-x86_64.dmg"
+          rustdeskPath="$HOME/Downloads/rustdesk.dmg"
+          curl -L -o "$rustdeskPath" "$rustdeskUrl"
+          echo "RUSTDESK_DMG=$rustdeskPath" >> $GITHUB_ENV
+          echo "RUSTDESK_APP=/Applications/RustDesk.app" >> $GITHUB_ENV
+
+      - name: Mount DMG and install RustDesk
+        run: |
+          # Mount the DMG
+          hdiutil attach "$RUSTDESK_DMG" -mountpoint /Volumes/RustDesk -nobrowse
+          
+          # Copy RustDesk to Applications
+          sudo cp -R "/Volumes/RustDesk/RustDesk.app" /Applications/
+          
+          # Unmount the DMG
+          hdiutil detach /Volumes/RustDesk
+          
+          # Verify installation
+          if [ -d "/Applications/RustDesk.app" ]; then
+            echo "RustDesk installed successfully"
+          else
+            echo "Failed to install RustDesk"
+            exit 1
+          fi
+
+      - name: Create working directory
+        run: |
+          workDir="$GITHUB_WORKSPACE/screenshots"
+          mkdir -p "$workDir"
+          echo "WORK_DIR=$workDir" >> $GITHUB_ENV
+
+      - name: Grant screen recording permissions
+        run: |
+          # Grant permissions for screen recording (required on macOS)
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES('kTCCServiceScreenRecording','com.apple.Terminal',0,1,1,NULL,NULL,NULL,'UNUSED',NULL,0,1661481547);" || true
+          # For CI environment, we may need to accept permissions manually is not possible
+          echo "Note: Screen recording permissions may need manual approval on macOS"
+
+      - name: Start RustDesk
+        run: |
+          # Start RustDesk in the background
+          open -a /Applications/RustDesk.app
+          echo "RustDesk started, waiting for initialization..."
+          sleep 15
+
+      - name: Take screenshots using screencapture
+        run: |
+          cd "$WORK_DIR"
+          
+          # Take 3 screenshots with different timings
+          for i in {1..3}; do
+            echo "Taking screenshot $i..."
+            screenshotPath="$WORK_DIR/screenshot_$i.png"
+            
+            # Using macOS built-in screencapture command
+            screencapture -x "$screenshotPath"
+            
+            echo "Screenshot saved to: $screenshotPath"
+            sleep 2
+          done
+
+      - name: Take screenshot of specific window
+        if: always()
+        run: |
+          cd "$WORK_DIR"
+          
+          # Try to capture RustDesk window specifically
+          echo "Looking for RustDesk window..."
+          
+          # Get window information (might need to adjust based on actual window title)
+          windowInfo=$(osascript -e 'tell application "System Events" to get name of every window of every process')
+          echo "Available windows: $windowInfo"
+          
+          # Take a regular screenshot as fallback
+          screencapture -x "$WORK_DIR/window_screenshot.png"
+
+      - name: Use alternative screenshot methods
+        if: always()
+        run: |
+          cd "$WORK_DIR"
+          
+          # Method 2: Use sips to capture screen (another alternative)
+          echo "Trying alternative screenshot method..."
+          
+          # Create a temporary PDF screenshot
+          screencapture -t pdf "$WORK_DIR/screenshot_pdf.pdf"
+          
+          # Convert PDF to PNG using sips
+          if [ -f "$WORK_DIR/screenshot_pdf.pdf" ]; then
+            sips -s format png "$WORK_DIR/screenshot_pdf.pdf" --out "$WORK_DIR/screenshot_sips.png"
+            rm "$WORK_DIR/screenshot_pdf.pdf"
+          fi
+          
+          # Method 3: Use Python for more control
+          python3 -c "
+          import subprocess
+          import time
+          
+          # Take screenshot using macOS CLI
+          timestamp = int(time.time())
+          filename = f'$WORK_DIR/python_screenshot_{timestamp}.png'
+          subprocess.run(['screencapture', '-x', filename])
+          print(f'Screenshot saved: {filename}')
+          "
+
+      - name: Verify and list screenshots
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Looking for screenshots in: $WORK_DIR"
+          
+          # List all files in working directory
+          ls -la "$WORK_DIR"
+          
+          # Count and list PNG files
+          screenshots=$(find "$WORK_DIR" -name "*.png" -type f 2>/dev/null || true)
+          screenshotCount=$(echo "$screenshots" | grep -c ".png" || echo "0")
+          
+          if [ "$screenshotCount" -eq 0 ]; then
+            echo "No PNG files found. Trying different locations..."
+            
+            # Check common locations
+            find /tmp -name "*.png" -type f 2>/dev/null | head -5
+            find "$HOME/Desktop" -name "*.png" -type f 2>/dev/null | head -5
+          else
+            echo "Found $screenshotCount screenshot(s):"
+            echo "$screenshots" | while read -r file; do
+              if [ -n "$file" ]; then
+                echo "  - $file"
+                # Get file size
+                if [ -f "$file" ]; then
+                  size=$(ls -lh "$file" | awk '{print $5}')
+                  echo "    Size: $size"
+                fi
+              fi
+            done
+          fi
+
+      - name: Cleanup before upload
+        run: |
+          # Remove any corrupted/empty screenshot files
+          find "$WORK_DIR" -name "*.png" -type f -size 0 -delete 2>/dev/null || true
+          
+          # Count valid screenshots
+          validScreenshots=$(find "$WORK_DIR" -name "*.png" -type f -size +1k 2>/dev/null | wc -l)
+          echo "Valid screenshots to upload: $validScreenshots"
+
+      - name: Upload screenshots as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-screenshots-macos
+          path: |
+            ${{ env.WORK_DIR }}/*.png
+          retention-days: 1
+
+      - name: Keep workflow running
+        run: |
+          echo "=== RustDesk Screenshot Workflow (macOS) ==="
+          echo "RustDesk is running in the background"
+          echo "Workflow will run for up to 24 hours"
+          echo "============================================"
+          
+          # Keep the workflow alive
+          startTime=$(date +%s)
+          while true; do
+            currentTime=$(date +%s)
+            elapsedHours=$(( (currentTime - startTime) / 3600 ))
+            
+            if [ $elapsedHours -ge 24 ]; then
+              echo "24-hour limit reached, workflow completed"
+              break
+            fi
+            
+            echo "[$(date)] RustDesk still running... (Elapsed: ${elapsedHours}h)"
+            echo "Next check in 5 minutes..."
+            
+            # Check if RustDesk is still running
+            if pgrep -f "RustDesk" > /dev/null; then
+              echo "RustDesk process is active"
+            else
+              echo "RustDesk process not found, it may have closed"
+            fi
+            
+            # Wait 5 minutes
+            sleep 300
+          done
+
+      - name: Cleanup (always run)
+        if: always()
+        run: |
+          echo "Cleaning up..."
+          
+          # Quit RustDesk if still running
+          pkill -f "RustDesk" 2>/dev/null || true
+          
+          # Remove temporary files
+          rm -f "$HOME/Downloads/rustdesk.dmg" 2>/dev/null || true
+          
+          echo "Cleanup complete"

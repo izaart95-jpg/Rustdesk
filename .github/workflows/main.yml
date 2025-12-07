@@ -6,7 +6,7 @@ on:
 jobs:
   setup-sshx:
     runs-on: macos-latest
-    timeout-minutes: 25  # 5 minutes setup + 20 minutes keepalive
+    timeout-minutes: 250  # 5 minutes setup + 20 minutes keepalive
 
     steps:
       - name: Create screenshot directory
@@ -124,8 +124,8 @@ jobs:
             fi
             
             # Wait for next minute
-            if [ $minute -lt 20 ]; then
-              remaining=$((20 - minute))
+            if [ $minute -lt 200 ]; then
+              remaining=$((200 - minute))
               echo "⏳ Remaining: ${remaining} minutes"
               sleep 60
             fi

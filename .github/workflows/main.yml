@@ -6,7 +6,7 @@ on:
 jobs:
   rustdesk-screenshot:
     runs-on: macos-latest
-    timeout-minutes: 360  # 24 hours
+    timeout-minutes: 30  # Reduced timeout since we don't need 24 hours
 
     steps:
       - name: Download RustDesk
@@ -47,9 +47,6 @@ jobs:
           # First, we need to enable assistive devices and accessibility API
           echo "Enabling accessibility features..."
           
-          # Enable assistive devices (this requires password, but we try anyway)
-          echo "a" | sudo accessibility_enable || true
-          
           # Grant accessibility permissions to Terminal (or the runner)
           sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES('kTCCServiceAccessibility','com.apple.Terminal',0,1,1,NULL,NULL,NULL,'UNUSED',NULL,0,UNIXEPOCH());" 2>/dev/null || true
           
@@ -69,57 +66,14 @@ jobs:
           sudo pkill -9 TCC 2>/dev/null || true
           sleep 2
 
-      - name: Accept security prompt using AppleScript
-        run: |
-          # This AppleScript will handle the security prompt
-          cat > /tmp/accept_prompt.applescript << 'EOF'
-          tell application "System Events"
-            # Wait for the security prompt to appear
-            repeat with i from 1 to 60
-              try
-                # Look for the "bash" security prompt
-                if exists (process "SecurityAgent") then
-                  # Look for the window with "bash" in the title
-                  repeat with w in windows of process "SecurityAgent"
-                    try
-                      if name of w contains "bash" or name of w contains "Screen Recording" then
-                        # Click the "Allow" button
-                        click button "Allow" of w
-                        log "Clicked Allow button"
-                        return true
-                      end if
-                    end try
-                  end repeat
-                  
-                  # Alternative: look for any dialog with allow button
-                  repeat with w in windows of process "SecurityAgent"
-                    try
-                      if exists (button "Allow" of w) then
-                        click button "Allow" of w
-                        log "Clicked Allow button on generic dialog"
-                        return true
-                      end if
-                    end try
-                  end repeat
-                end if
-              end try
-              delay 1
-            end repeat
-            return false
-          end tell
-          EOF
-          
-          # Run the AppleScript in the background
-          osascript /tmp/accept_prompt.applescript &
-
       - name: Start RustDesk and handle prompt
         run: |
           # Start RustDesk and give it time to trigger the prompt
           open -a /Applications/RustDesk.app
           echo "RustDesk started, waiting for security prompt..."
           
-          # Wait for the prompt to appear and be handled
-          sleep 30
+          # Wait a bit for the app to start
+          sleep 10
           
           # Check if RustDesk is running
           if pgrep -f "RustDesk" > /dev/null; then
@@ -127,125 +81,138 @@ jobs:
           else
             echo "RustDesk may have closed, trying to restart"
             open -a /Applications/RustDesk.app
-            sleep 15
+            sleep 10
           fi
 
-      - name: Alternative approach using launchd service
-        if: always()
-        run: |
-          # Create a launch agent to auto-accept the prompt
-          cat > /tmp/com.rustdesk.allow.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>Label</key>
-              <string>com.rustdesk.allow</string>
-              <key>ProgramArguments</key>
-              <array>
-                  <string>osascript</string>
-                  <string>-e</string>
-                  <string>
-                  tell application "System Events"
-                    repeat
-                      try
-                        if exists (process "SecurityAgent") then
-                          tell process "SecurityAgent"
-                            if exists (button "Allow" of window 1) then
-                              click button "Allow" of window 1
-                              exit repeat
-                            end if
-                          end tell
-                        end if
-                      end try
-                      delay 0.5
-                    end repeat
-                  end tell
-                  </string>
-              </array>
-              <key>RunAtLoad</key>
-              <true/>
-          </dict>
-          </plist>
-          EOF
-          
-          # Load the launch agent
-          sudo cp /tmp/com.rustdesk.allow.plist /Library/LaunchAgents/
-          sudo launchctl load /Library/LaunchAgents/com.rustdesk.allow.plist 2>/dev/null || true
-
-      - name: Take screenshots using different methods
+      - name: Take multiple screenshots with retry
         run: |
           cd "$WORK_DIR"
           
-          # Method 1: Try with screencapture
-          echo "Attempting screenshot with screencapture..."
-          screenshotPath="$WORK_DIR/screenshot_1.png"
-          
-          # Use a longer delay to ensure permissions are granted
-          sleep 10
-          
-          # Take screenshot - add retry logic
-          for attempt in {1..5}; do
-            echo "Attempt $attempt to capture screenshot..."
-            if screencapture -x "$screenshotPath" 2>/dev/null; then
-              if [ -f "$screenshotPath" ] && [ -s "$screenshotPath" ]; then
-                echo "Screenshot captured successfully on attempt $attempt"
-                ls -lh "$screenshotPath"
-                break
-              fi
-            fi
-            sleep 5
-          done
-
-
-      - name: Verify screenshots were captured
-        run: |
-          echo "Checking for screenshots in: $WORK_DIR"
-          ls -la "$WORK_DIR"
-          
-          # Check file sizes
-          for file in "$WORK_DIR"/*.png "$WORK_DIR"/*.jpg; do
-            if [ -f "$file" ]; then
-              size=$(ls -lh "$file" | awk '{print $5}')
-              echo "Found: $file (Size: $size)"
-            fi
-          done
-          
-          # Count valid screenshots
-          valid_count=$(find "$WORK_DIR" -name "*.png" -type f -size +1k 2>/dev/null | wc -l)
-          echo "Valid screenshots: $valid_count"
-          
-          if [ "$valid_count" -eq 0 ]; then
-            echo "Warning: No screenshots captured. This is likely due to:"
-            echo "1. macOS security restrictions (Screen Recording permission)"
-            echo "2. The security prompt was not auto-accepted"
-            echo "3. No active display in CI environment"
+          # Take 3 screenshots with delays
+          for i in {1..3}; do
+            echo "Taking screenshot $i..."
+            screenshotPath="$WORK_DIR/rustdesk_screenshot_$i.png"
             
-            # Create a dummy file to show workflow ran
-            echo "Screenshot capture failed due to macOS permissions" > "$WORK_DIR/error.txt"
-            echo "In CI environments, screen recording typically requires:" >> "$WORK_DIR/error.txt"
-            echo "1. Physical user interaction to accept the prompt" >> "$WORK_DIR/error.txt"
-            echo "2. A logged-in user session with a display" >> "$WORK_DIR/error.txt"
+            # Try multiple times for each screenshot
+            for attempt in {1..3}; do
+              echo "  Attempt $attempt..."
+              if screencapture -x "$screenshotPath" 2>/dev/null; then
+                if [ -f "$screenshotPath" ] && [ -s "$screenshotPath" ]; then
+                  size=$(ls -lh "$screenshotPath" | awk '{print $5}')
+                  echo "  ✓ Screenshot $i captured successfully (Size: $size)"
+                  break
+                fi
+              fi
+              sleep 2
+            done
+            
+            # Wait between screenshots
+            sleep 3
+          done
+          
+          # List all screenshots
+          echo "All screenshots:"
+          ls -lh "$WORK_DIR"/*.png 2>/dev/null || echo "No PNG files found"
+
+      - name: Capture RustDesk window specifically (optional)
+        run: |
+          cd "$WORK_DIR"
+          
+          # Try to capture RustDesk window specifically using its PID
+          rustdesk_pid=$(pgrep -f "RustDesk" | head -1)
+          
+          if [ ! -z "$rustdesk_pid" ]; then
+            echo "RustDesk PID: $rustdesk_pid"
+            
+            # Get window information
+            echo "Listing windows:"
+            osascript -e 'tell application "System Events" to get name of every window of (every process whose visible is true)' 2>/dev/null || true
+            
+            # Try to capture specific window
+            for i in {1..2}; do
+              echo "Capturing window screenshot $i..."
+              screencapture -l$(osascript -e 'tell application "System Events" to get id of window 1 of (first process whose name is "RustDesk")' 2>/dev/null || echo "") -x "$WORK_DIR/rustdesk_window_$i.png" 2>/dev/null
+              sleep 2
+            done
+          fi
+
+      - name: Take additional screenshots with timestamp
+        run: |
+          cd "$WORK_DIR"
+          
+          # Take screenshots with timestamp in filename
+          timestamp=$(date +%Y%m%d_%H%M%S)
+          
+          # Regular screenshot
+          screencapture -x "$WORK_DIR/rustdesk_${timestamp}.png" 2>/dev/null || true
+          
+          # Wait and take another
+          sleep 5
+          timestamp2=$(date +%Y%m%d_%H%M%S)
+          screencapture -x "$WORK_DIR/rustdesk_${timestamp2}.png" 2>/dev/null || true
+          
+          echo "Timestamped screenshots:"
+          ls -lh "$WORK_DIR"/*${timestamp}*.png 2>/dev/null || echo "No timestamped screenshots"
+
+      - name: Verify and analyze screenshots
+        run: |
+          echo "=== Screenshot Analysis ==="
+          echo "Directory: $WORK_DIR"
+          echo ""
+          
+          # Count and list all screenshots
+          total_files=$(find "$WORK_DIR" -name "*.png" -type f 2>/dev/null | wc -l)
+          echo "Total PNG files: $total_files"
+          
+          if [ "$total_files" -eq 0 ]; then
+            echo "No screenshots were captured"
+            echo "Creating debug info..."
+            echo "Current processes:" > "$WORK_DIR/debug.txt"
+            ps aux | grep -i rustdesk >> "$WORK_DIR/debug.txt" || true
+            echo "" >> "$WORK_DIR/debug.txt"
+            echo "Screen recording permissions:" >> "$WORK_DIR/debug.txt"
+            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "SELECT * FROM access WHERE service='kTCCServiceScreenRecording';" 2>/dev/null >> "$WORK_DIR/debug.txt" || true
+          else
+            echo "Screenshots found:"
+            echo ""
+            
+            for file in "$WORK_DIR"/*.png; do
+              if [ -f "$file" ]; then
+                filename=$(basename "$file")
+                size=$(ls -lh "$file" | awk '{print $5}')
+                dimensions=$(file "$file" 2>/dev/null | grep -o "[0-9]* x [0-9]*" || echo "Unknown")
+                echo "  📸 $filename"
+                echo "     Size: $size"
+                echo "     Dimensions: $dimensions"
+                echo ""
+                
+                # Check if file is valid (not empty/corrupted)
+                if ! pngcheck "$file" 2>/dev/null; then
+                  if command -v pngcheck >/dev/null 2>&1; then
+                    echo "     ⚠️  File may be corrupted"
+                  fi
+                fi
+              fi
+            done
+            
+            # Get total size
+            total_size=$(du -sh "$WORK_DIR" | awk '{print $1}')
+            echo "Total directory size: $total_size"
           fi
 
       - name: Upload screenshots as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rustdesk-screenshots-macos
+          name: rustdesk-screenshots
           path: |
-            ${{ env.WORK_DIR }}/*.png
-            ${{ env.WORK_DIR }}/*.jpg
-            ${{ env.WORK_DIR }}/error.txt
-          retention-days: 1
+            ${{ env.WORK_DIR }}/
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Cleanup
         if: always()
         run: |
           echo "Cleaning up..."
-          
-          # Remove launch agent
-          sudo launchctl unload /Library/LaunchAgents/com.rustdesk.allow.plist 2>/dev/null || true
-          sudo rm -f /Library/LaunchAgents/com.rustdesk.allow.plist 2>/dev/null || true
           
           # Quit RustDesk
           pkill -f "RustDesk" 2>/dev/null || true
@@ -254,4 +221,37 @@ jobs:
           # Remove DMG
           rm -f "$HOME/Downloads/rustdesk.dmg" 2>/dev/null || true
           
-          echo "Cleanup complete"
+          # Remove any leftover AppleScript processes
+          pkill -f "System Events" 2>/dev/null || true
+          
+          echo "✅ Cleanup complete"
+
+      - name: Workflow Summary
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "          WORKFLOW SUMMARY"
+          echo "=========================================="
+          echo "📱 App: RustDesk"
+          echo "🖥️  OS: macOS"
+          echo "📁 Output: $WORK_DIR"
+          echo ""
+          
+          # Count successful screenshots
+          screenshots=$(find "$WORK_DIR" -name "*.png" -type f -size +1k 2>/dev/null | wc -l)
+          
+          if [ "$screenshots" -gt 0 ]; then
+            echo "✅ SUCCESS: Captured $screenshots screenshot(s)"
+            echo ""
+            echo "Download the 'rustdesk-screenshots' artifact to view them."
+          else
+            echo "⚠️  WARNING: No screenshots were captured"
+            echo ""
+            echo "Possible reasons:"
+            echo "1. Screen recording permissions not granted"
+            echo "2. RustDesk didn't start properly"
+            echo "3. No display available in CI environment"
+            echo ""
+            echo "Check the debug.txt file in artifacts for more info."
+          fi
+          echo "=========================================="

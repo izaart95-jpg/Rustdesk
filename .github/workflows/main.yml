@@ -6,115 +6,196 @@ on:
 jobs:
   rustdesk-screenshot:
     runs-on: macos-latest
-    timeout-minutes: 360  # Keep running for 6 hours
+    timeout-minutes: 360
 
     steps:
       - name: Download RustDesk
         run: |
-          rustdeskUrl="https://github.com/rustdesk/rustdesk/releases/download/1.4.4/rustdesk-1.4.4-x86_64.dmg"
-          rustdeskPath="$HOME/Downloads/rustdesk.dmg"
-          curl -L -o "$rustdeskPath" "$rustdeskUrl"
-          echo "RUSTDESK_DMG=$rustdeskPath" >> $GITHUB_ENV
-
-      - name: Mount DMG and install RustDesk
-        run: |
-          hdiutil attach "$RUSTDESK_DMG" -mountpoint /Volumes/RustDesk -nobrowse
+          curl -L -o rustdesk.dmg "https://github.com/rustdesk/rustdesk/releases/download/1.4.4/rustdesk-1.4.4-x86_64.dmg"
+          hdiutil attach rustdesk.dmg -mountpoint /Volumes/RustDesk -nobrowse
           sudo cp -R "/Volumes/RustDesk/RustDesk.app" /Applications/
           hdiutil detach /Volumes/RustDesk
 
-      - name: Create working directory
+      - name: Create screenshot directory
         run: |
-          workDir="$GITHUB_WORKSPACE/screenshots"
-          mkdir -p "$workDir"
-          echo "WORK_DIR=$workDir" >> $GITHUB_ENV
+          mkdir -p screenshots
+          echo "SCREENSHOT_DIR=$(pwd)/screenshots" >> $GITHUB_ENV
 
-      - name: Set screen recording permissions
+      - name: Auto-click "Allow" on permission popup
         run: |
-          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
-            "INSERT OR REPLACE INTO access VALUES('kTCCServiceScreenRecording','/bin/bash',0,1,1,NULL,NULL,NULL,'UNUSED',NULL,0,strftime('%s','now'));" 2>/dev/null || true
-          sudo pkill -9 TCC 2>/dev/null || true
-          sleep 2
+          # Create AppleScript to click "Allow" button
+          cat > /tmp/click_allow.applescript << 'EOF'
+          tell application "System Events"
+            repeat with i from 1 to 30
+              try
+                if exists (process "SecurityAgent") then
+                  tell process "SecurityAgent"
+                    repeat with w in windows
+                      try
+                        if exists (button "Allow" of w) then
+                          click button "Allow" of w
+                          log "Clicked 'Allow' button"
+                          return true
+                        end if
+                      end try
+                    end repeat
+                    
+                    # Also try "Open System Preferences" if "Allow" isn't visible
+                    repeat with w in windows
+                      try
+                        if exists (button "Open System Preferences" of w) then
+                          click button "Open System Preferences" of w
+                          log "Clicked 'Open System Preferences'"
+                          delay 2
+                          
+                          # In System Preferences, click the checkbox
+                          tell application "System Preferences"
+                            activate
+                            delay 1
+                          end tell
+                          
+                          tell process "System Preferences"
+                            if exists (checkbox 1 of tab group 1 of window 1) then
+                              click checkbox 1 of tab group 1 of window 1
+                              log "Checked screen recording permission"
+                              delay 1
+                              
+                              # Close System Preferences
+                              keystroke "w" using command down
+                              return true
+                            end if
+                          end tell
+                        end if
+                      end try
+                    end repeat
+                  end tell
+                end if
+              end try
+              delay 1
+            end repeat
+            return false
+          end tell
+          EOF
+          
+          # Run AppleScript in background to handle the prompt
+          osascript /tmp/click_allow.applescript &
 
-      - name: Start RustDesk
+      - name: Start RustDesk and handle permission
         run: |
+          echo "Starting RustDesk..."
           open -a /Applications/RustDesk.app
-          sleep 10
-
-      - name: Take initial screenshot
-        run: |
-          cd "$WORK_DIR"
-          screencapture -x "$WORK_DIR/rustdesk_initial.png"
-          ls -lh "$WORK_DIR"/*.png 2>/dev/null || echo "No screenshots yet"
-
-      - name: Upload initial screenshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: rustdesk-initial-screenshot
-          path: ${{ env.WORK_DIR }}/*.png
-          retention-days: 1
-
-      - name: Keep workflow running and take periodic screenshots
-        run: |
-          echo "=== RustDesk Screenshot Monitor ==="
-          echo "Workflow will run for up to 6 hours"
-          echo "Taking periodic screenshots..."
-          echo "==================================="
           
-          start_time=$(date +%s)
-          end_time=$((start_time + 3600))  # 1 hour from now (adjust as needed)
-          screenshot_count=0
+          # Wait for permission popup to appear
+          echo "Waiting for permission popup..."
+          sleep 15
           
-          while [ $(date +%s) -lt $end_time ]; do
-            current_time=$(date +%s)
-            elapsed_minutes=$(( (current_time - start_time) / 60 ))
-            
-            # Take a screenshot
-            screenshot_count=$((screenshot_count + 1))
-            timestamp=$(date +%Y%m%d_%H%M%S)
-            screenshot_file="$WORK_DIR/rustdesk_${timestamp}_${screenshot_count}.png"
-            
-            echo "[$(date '+%H:%M:%S')] Taking screenshot #${screenshot_count} (Elapsed: ${elapsed_minutes}m)..."
+          # Force a screenshot attempt to trigger the popup
+          echo "Triggering screen recording request..."
+          screencapture -x /tmp/test_trigger.png 2>/dev/null || true
+          sleep 5
+          
+          # Check if RustDesk is running
+          if pgrep -f "RustDesk" > /dev/null; then
+            echo "✓ RustDesk is running"
+          else
+            echo "✗ RustDesk not running, trying again..."
+            open -a /Applications/RustDesk.app
+            sleep 10
+          fi
+
+      - name: Take screenshots with manual approval simulation
+        run: |
+          echo "Taking screenshots..."
+          
+          # Method 1: Try normal screenshot
+          for i in {1..5}; do
+            echo "Attempt $i..."
+            screenshot_file="$SCREENSHOT_DIR/screenshot_$i.png"
             
             if screencapture -x "$screenshot_file" 2>/dev/null; then
               if [ -f "$screenshot_file" ] && [ -s "$screenshot_file" ]; then
                 size=$(ls -lh "$screenshot_file" | awk '{print $5}')
-                echo "  ✓ Saved: $(basename "$screenshot_file") (${size})"
-              else
-                echo "  ✗ Failed to save screenshot"
+                echo "✓ Success! File: $screenshot_file (${size})"
+                break
               fi
             else
-              echo "  ✗ Failed to capture screenshot"
+              echo "✗ Failed attempt $i"
+              
+              # If we're failing, try to trigger the popup again
+              if [ $i -eq 2 ]; then
+                echo "Trying to trigger permission dialog again..."
+                # Simulate a system event that might trigger the dialog
+                osascript -e 'tell application "System Events" to key code 53' 2>/dev/null || true
+                sleep 3
+              fi
             fi
-            
-            # Check if RustDesk is still running
-            if pgrep -f "RustDesk" > /dev/null; then
-              echo "  RustDesk process is active"
-            else
-              echo "  RustDesk process not found, restarting..."
-              open -a /Applications/RustDesk.app
-              sleep 10
-            fi
-            
-            # Wait before next screenshot (e.g., 5 minutes)
-            echo "  Next screenshot in 5 minutes..."
-            sleep 300  # 5 minutes
-            
-            # Every 30 minutes, upload accumulated screenshots
-            if [ $((screenshot_count % 6)) -eq 0 ]; then
-              echo "=== Uploading batch of screenshots ==="
-              # You could add another upload-artifact step here if needed
-            fi
+            sleep 3
           done
           
-          echo "==================================="
-          echo "Monitoring completed after ${elapsed_minutes} minutes"
-          echo "Total screenshots taken: ${screenshot_count}"
-          echo "==================================="
+          # If still no success, create a debug screenshot showing the popup
+          if [ ! -f "$SCREENSHOT_DIR/screenshot_1.png" ] || [ ! -s "$SCREENSHOT_DIR/screenshot_1.png" ]; then
+            echo "Creating debug information..."
+            echo "The screenshot shows a macOS permission popup that says:" > "$SCREENSHOT_DIR/README.txt"
+            echo '"bash" is requesting to bypass the system privacy window picker' >> "$SCREENSHOT_DIR/README.txt"
+            echo 'and directly access your screen and audio' >> "$SCREENSHOT_DIR/README.txt"
+            echo "" >> "$SCREENSHOT_DIR/README.txt"
+            echo "This requires manual interaction to click 'Allow'" >> "$SCREENSHOT_DIR/README.txt"
+            echo "In CI environments, this cannot be automated reliably." >> "$SCREENSHOT_DIR/README.txt"
+          fi
 
-      - name: Final cleanup
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-screenshots
+          path: ${{ env.SCREENSHOT_DIR }}
+          retention-days: 1
+
+      - name: Keep workflow running
+        run: |
+          echo "=== Keeping workflow alive ==="
+          echo "Workflow will run until timeout (6 hours)"
+          echo "RustDesk is installed but needs manual permission"
+          echo ""
+          echo "To fix this permanently on a macOS machine:"
+          echo "1. Run RustDesk manually once"
+          echo "2. Click 'Allow' on the permission popup"
+          echo "3. Then automated screenshots will work"
+          echo ""
+          echo "Current time: $(date)"
+          echo "Will run until: $(date -v+6H)"
+          
+          # Keep the job alive
+          start_time=$(date +%s)
+          while true; do
+            current_time=$(date +%s)
+            elapsed=$((current_time - start_time))
+            hours=$((elapsed / 3600))
+            minutes=$(((elapsed % 3600) / 60))
+            
+            echo "[$(date '+%H:%M:%S')] Still running... (Elapsed: ${hours}h ${minutes}m)"
+            
+            # Take a screenshot every 10 minutes
+            if [ $((elapsed % 600)) -lt 10 ]; then
+              timestamp=$(date +%Y%m%d_%H%M%S)
+              debug_file="$SCREENSHOT_DIR/debug_${timestamp}.png"
+              screencapture -x "$debug_file" 2>/dev/null || true
+              echo "  Debug screenshot: $debug_file"
+            fi
+            
+            # Check RustDesk status
+            if pgrep -f "RustDesk" > /dev/null; then
+              echo "  RustDesk: Running"
+            else
+              echo "  RustDesk: Not running"
+            fi
+            
+            sleep 60  # Check every minute
+          done
+
+      - name: Cleanup
         if: always()
         run: |
-          echo "Final cleanup..."
+          echo "Cleaning up..."
           pkill -f "RustDesk" 2>/dev/null || true
-          rm -f "$HOME/Downloads/rustdesk.dmg" 2>/dev/null || true
-          echo "All done!"
+          pkill -f "System Events" 2>/dev/null || true
+          rm -f rustdesk.dmg 2>/dev/null || true

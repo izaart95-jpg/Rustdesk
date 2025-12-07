@@ -1,375 +1,296 @@
-name: macOS Settings Screenshot
+name: RustDesk with VNC & Tailscale Remote Access
 
 on:
   workflow_dispatch:
 
 jobs:
-  settings-screenshots:
+  setup-remote-access:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
 
     steps:
+      - name: Setup VNC with ARD
+        run: |
+          echo "=== Setting up Apple Remote Desktop/VNC ==="
+          
+          # Activate and configure ARD agent with full privileges
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -restart -agent -privs -all
+          
+          # Enable legacy VNC
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvnclegacy -vnclegacy yes
+          
+          # Set VNC password (using a default password, change if needed)
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvncpw myvncpassword -vncpw myvncpassword
+          
+          # Allow access for all users
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -allowAccessFor -allUsers
+          
+          echo "✅ VNC/ARD setup complete"
+          echo "VNC Password: myvncpassword"
+          echo ""
+          
+          # Restart the service to apply changes
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -restart -agent
+          
+          sleep 5
+
+      - name: Install and configure Tailscale
+        run: |
+          echo "=== Installing Tailscale ==="
+          
+          # Install Tailscale from official script
+          curl -fsSL https://tailscale.com/install.sh | sh
+          
+          # Start tailscaled service
+          echo "Starting tailscaled service..."
+          sudo tailscaled 2>/dev/null || true
+          
+          # If command not found, try alternative paths
+          if ! command -v tailscale &> /dev/null; then
+            echo "Tailscale command not found, trying alternative..."
+            
+            # Try to start via the app
+            sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale --cleanup 2>/dev/null || true
+            sudo tailscaled 2>/dev/null || true
+            
+            # If still not found, try Homebrew
+            if ! command -v brew &> /dev/null; then
+              echo "Installing Homebrew..."
+              /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            fi
+            
+            echo "Installing Tailscale via Homebrew..."
+            brew install tailscale
+            sudo brew services start tailscaled
+          fi
+          
+          # Wait a moment for service to start
+          sleep 3
+          
+          echo "✅ Tailscale installation complete"
+
+      - name: Authenticate Tailscale
+        run: |
+          echo "=== Authenticating Tailscale ==="
+          
+          # Auth key - replace with your actual key
+          AUTH_KEY="tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf"
+          
+          echo "Authenticating with Tailscale..."
+          
+          # Try multiple times with delays
+          for attempt in {1..5}; do
+            echo "Authentication attempt $attempt..."
+            
+            if sudo tailscale up --authkey "$AUTH_KEY" 2>&1; then
+              echo "✅ Tailscale authentication successful"
+              break
+            else
+              echo "Attempt $attempt failed, waiting..."
+              sleep 5
+            fi
+          done
+          
+          # Wait for connection to establish
+          echo "Waiting for Tailscale connection..."
+          sleep 10
+
+      - name: Get connection info
+        run: |
+          echo "=== Connection Information ==="
+          
+          # Get Tailscale status
+          echo "Tailscale Status:"
+          tailscale status 2>/dev/null || echo "Tailscale status command failed"
+          
+          # Get Tailscale IP
+          echo ""
+          echo "Tailscale IP:"
+          tailscale ip 2>/dev/null || echo "Could not get Tailscale IP"
+          
+          # Get local network info
+          echo ""
+          echo "Local Network Info:"
+          ifconfig | grep "inet " | grep -v 127.0.0.1 | head -5 || ipconfig getifaddr en0 || true
+          
+          # Check VNC port
+          echo ""
+          echo "VNC Service Status:"
+          sudo lsof -i :5900 2>/dev/null || echo "VNC not listening on port 5900"
+          echo "ARD/VNC should be accessible via: vnc://<ip>:5900"
+          
+          # Create connection info file
+          INFO_FILE="$HOME/connection_info.txt"
+          echo "Connection Information" > "$INFO_FILE"
+          echo "=====================" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          echo "VNC Access:" >> "$INFO_FILE"
+          echo "  Password: myvncpassword" >> "$INFO_FILE"
+          echo "  Port: 5900" >> "$INFO_FILE"
+          echo "" >> "$INFO_FILE"
+          
+          TAILSCALE_IP=$(tailscale ip 2>/dev/null || echo "Not available")
+          echo "Tailscale IP: $TAILSCALE_IP" >> "$INFO_FILE"
+          
+          # Get public IP for reference
+          PUBLIC_IP=$(curl -s ifconfig.me 2>/dev/null || echo "Not available")
+          echo "Public IP: $PUBLIC_IP" >> "$INFO_FILE"
+          
+          echo "Connection info saved to: $INFO_FILE"
+
+      - name: Install RustDesk
+        run: |
+          echo "=== Installing RustDesk ==="
+          
+          # Download and install RustDesk
+          curl -L -o rustdesk.dmg "https://github.com/rustdesk/rustdesk/releases/download/1.4.4/rustdesk-1.4.4-x86_64.dmg"
+          hdiutil attach rustdesk.dmg -mountpoint /Volumes/RustDesk -nobrowse
+          sudo cp -R "/Volumes/RustDesk/RustDesk.app" /Applications/
+          hdiutil detach /Volumes/RustDesk
+          rm -f rustdesk.dmg
+          
+          echo "✅ RustDesk installed"
+
+      - name: Start RustDesk
+        run: |
+          echo "=== Starting RustDesk ==="
+          
+          # Start RustDesk
+          open -a /Applications/RustDesk.app
+          sleep 10
+          
+          # Check if running
+          if pgrep -f "RustDesk" > /dev/null; then
+            echo "✅ RustDesk is running"
+          else
+            echo "⚠️ RustDesk may not have started properly"
+          fi
+
       - name: Create screenshot directory
         run: |
           mkdir -p screenshots
           echo "SCREENSHOT_DIR=$(pwd)/screenshots" >> $GITHUB_ENV
 
-      - name: Detect macOS version
+      - name: Take initial screenshots
         run: |
-          macos_version=$(sw_vers -productVersion)
-          echo "macOS Version: $macos_version"
-          echo "MACOS_VERSION=$macos_version" >> $GITHUB_ENV
+          echo "=== Taking initial screenshots ==="
           
-          # Extract major version
-          major_version=$(echo $macos_version | cut -d. -f1)
-          echo "Major Version: $major_version"
-          echo "MAJOR_VERSION=$major_version" >> $GITHUB_ENV
-
-      - name: Open System Settings
-        run: |
-          # Close System Settings if already open
-          osascript -e 'tell application "System Settings" to quit' 2>/dev/null || true
-          sleep 2
-          
-          echo "Opening System Settings..."
-          open -a "System Settings"
-          sleep 5
-          
-          # Wait for System Settings to fully load
-          osascript -e '
-            tell application "System Settings"
-              activate
-              repeat 10 times
-                if it is running then
-                  exit repeat
-                end if
-                delay 1
-              end repeat
-              delay 2
-            end tell
-          '
-
-      - name: Take screenshot of main Settings window
-        run: |
-          echo "Taking screenshot of main Settings window..."
-          
-          # Simple full screen screenshot
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screenshot_file="$SCREENSHOT_DIR/00_main_settings_${timestamp}.png"
-          screencapture -x "$screenshot_file"
-          
-          # Also take a focused window screenshot
-          sleep 1
-          screencapture -w "$SCREENSHOT_DIR/01_main_window_${timestamp}.png"
-          
-          echo "✓ Main screenshots saved"
-
-      - name: Method 1 - Direct URL navigation (macOS 13+)
-        run: |
-          echo "Method 1: Using direct URLs (macOS 13+)..."
-          
-          # Close and reopen for clean state
-          osascript -e 'tell application "System Settings" to quit' 2>/dev/null || true
-          sleep 2
-          
-          # Navigate directly using URLs (works on Ventura+)
-          open "x-apple.systempreferences:com.apple.settings.General"
-          sleep 3
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screencapture -x "$SCREENSHOT_DIR/02_general_url_${timestamp}.png"
-          echo "✓ General via URL"
-          
-          open "x-apple.systempreferences:com.apple.settings.Sharing"
-          sleep 3
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screencapture -x "$SCREENSHOT_DIR/03_sharing_url_${timestamp}.png"
-          echo "✓ Sharing via URL"
-
-      - name: Method 2 - AppleScript for older macOS
-        if: ${{ env.MAJOR_VERSION < 13 }}
-        run: |
-          echo "Method 2: AppleScript for macOS 12 or earlier..."
-          
-          osascript -e 'tell application "System Preferences" to quit' 2>/dev/null || true
-          sleep 2
-          open -a "System Preferences"
-          sleep 3
-          
-          osascript << 'EOF'
-            tell application "System Preferences"
-              activate
-              reveal anchor "General" of pane "com.apple.preference.general"
-              delay 2
-            end tell
-          EOF
-          
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screencapture -x "$SCREENSHOT_DIR/04_general_legacy_${timestamp}.png"
-          echo "✓ General (legacy)"
-          
-          osascript << 'EOF'
-            tell application "System Preferences"
-              activate
-              reveal anchor "SharingPref" of pane "com.apple.preference.sharing"
-              delay 2
-            end tell
-          EOF
-          
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screencapture -x "$SCREENSHOT_DIR/05_sharing_legacy_${timestamp}.png"
-          echo "✓ Sharing (legacy)"
-
-      - name: Method 3 - UI navigation with accessibility
-        run: |
-          echo "Method 3: UI navigation with accessibility checks..."
-          
-          osascript -e 'tell application "System Settings" to quit' 2>/dev/null || true
-          sleep 2
-          open -a "System Settings"
-          sleep 5
-          
-          # First, get UI structure for debugging
-          echo "Getting UI structure..."
-          osascript << 'EOF' > "$SCREENSHOT_DIR/ui_structure.txt" 2>&1 || true
-            tell application "System Events"
-              tell process "System Settings"
-                -- List all windows
-                repeat with i from 1 to (count windows)
-                  try
-                    log "Window " & i & ": " & name of window i
-                  end try
-                end repeat
-                
-                -- List UI elements
-                tell window 1
-                  repeat with i from 1 to (count entire contents)
-                    try
-                      set elem to UI element i
-                      log "Element " & i & ": " & (class of elem as text) & " - " & (name of elem as text)
-                    end try
-                  end repeat
-                end tell
-              end tell
-            end tell
-          EOF
-          
-          echo "UI structure saved to ui_structure.txt"
-
-      - name: Method 4 - Keyboard navigation
-        run: |
-          echo "Method 4: Keyboard navigation..."
-          
-          osascript -e 'tell application "System Settings" to quit' 2>/dev/null || true
-          sleep 2
-          open -a "System Settings"
-          sleep 3
-          
-          # Use keyboard to navigate
-          osascript << 'EOF'
-            tell application "System Settings"
-              activate
-              delay 2
-            end tell
-            
-            tell application "System Events"
-              delay 1
-              
-              -- Press Cmd+F to focus search
-              keystroke "f" using command down
-              delay 1
-              
-              -- Search for General
-              keystroke "General"
-              delay 2
-              
-              -- Press Enter to select first result
-              key code 36
-              delay 3
-            end tell
-          EOF
-          
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screencapture -x "$SCREENSHOT_DIR/06_general_search_${timestamp}.png"
-          echo "✓ General via search"
-          
-          # Now search for Sharing
-          osascript << 'EOF'
-            tell application "System Events"
-              -- Press Cmd+F to focus search again
-              keystroke "f" using command down
-              delay 1
-              
-              -- Clear and search for Sharing
-              keystroke "a" using command down
-              keystroke (ASCII character 127)
-              keystroke "Sharing"
-              delay 2
-              
-              -- Press Enter
-              key code 36
-              delay 3
-            end tell
-          EOF
-          
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screencapture -x "$SCREENSHOT_DIR/07_sharing_search_${timestamp}.png"
-          echo "✓ Sharing via search"
-
-      - name: Method 5 - Sidebar navigation
-        run: |
-          echo "Method 5: Sidebar navigation (macOS 13+)..."
-          
-          if [[ "$MAJOR_VERSION" -ge 13 ]]; then
-            osascript -e 'tell application "System Settings" to quit' 2>/dev/null || true
+          # Take a few screenshots to verify everything works
+          for i in {1..3}; do
+            echo "Taking screenshot $i..."
+            screenshot_file="$SCREENSHOT_DIR/initial_$i.png"
+            screencapture -x "$screenshot_file" 2>/dev/null || true
             sleep 2
-            open -a "System Settings"
-            sleep 3
             
-            osascript << 'EOF'
-              tell application "System Settings"
-                activate
-                delay 2
-              end tell
-              
-              tell application "System Events"
-                tell process "System Settings"
-                  -- Try to find and click General in sidebar
-                  try
-                    click (first button of scroll area 1 whose name is "General")
-                    delay 2
-                  on error
-                    -- Alternative: Try list elements
-                    try
-                      tell outline 1 of scroll area 1
-                        click (first UI element whose name is "General")
-                        delay 2
-                      end tell
-                    end try
-                  end try
-                end tell
-              end tell
-            EOF
-            
-            timestamp=$(date +%Y%m%d_%H%M%S)
-            screencapture -x "$SCREENSHOT_DIR/08_general_sidebar_${timestamp}.png"
-            echo "✓ General via sidebar"
-            
-            # Navigate to Sharing
-            osascript << 'EOF'
-              tell application "System Events"
-                tell process "System Settings"
-                  try
-                    click (first button of scroll area 1 whose name is "Sharing")
-                    delay 2
-                  on error
-                    try
-                      tell outline 1 of scroll area 1
-                        click (first UI element whose name is "Sharing")
-                        delay 2
-                      end tell
-                    end try
-                  end try
-                end tell
-              end tell
-            EOF
-            
-            timestamp=$(date +%Y%m%d_%H%M%S)
-            screencapture -x "$SCREENSHOT_DIR/09_sharing_sidebar_${timestamp}.png"
-            echo "✓ Sharing via sidebar"
-          else
-            echo "Skipping sidebar navigation for macOS < 13"
-          fi
+            if [ -f "$screenshot_file" ] && [ -s "$screenshot_file" ]; then
+              size=$(ls -lh "$screenshot_file" | awk '{print $5}')
+              echo "  Screenshot $i: ${size}"
+            fi
+          done
 
-      - name: Method 6 - Simple screenshots with descriptions
-        run: |
-          echo "Method 6: Taking descriptive screenshots..."
-          
-          # Just take screenshots at intervals with descriptions
-          echo "Taking baseline screenshot..."
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          screencapture -x "$SCREENSHOT_DIR/10_baseline_${timestamp}.png"
-          
-          # Create a description file
-          cat > "$SCREENSHOT_DIR/descriptions.txt" << EOF
-          Screenshots taken on: $(date)
-          macOS Version: $MACOS_VERSION
-          
-          00_main_settings.png - Main System Settings window
-          01_main_window.png - Focused System Settings window
-          02_general_url.png - General settings via direct URL
-          03_sharing_url.png - Sharing settings via direct URL
-          04_general_legacy.png - General (legacy method for macOS < 13)
-          05_sharing_legacy.png - Sharing (legacy method for macOS < 13)
-          06_general_search.png - General accessed via search
-          07_sharing_search.png - Sharing accessed via search
-          08_general_sidebar.png - General via sidebar navigation
-          09_sharing_sidebar.png - Sharing via sidebar navigation
-          10_baseline.png - Baseline screenshot
-          
-          Note: Not all methods may work depending on macOS version.
-          EOF
-          
-          echo "✓ Descriptive screenshots taken"
+      - name: Upload connection info and screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-access-info
+          path: |
+            $HOME/connection_info.txt
+            ${{ env.SCREENSHOT_DIR }}
+          retention-days: 1
 
-      - name: List and verify screenshots
+      - name: Keep system running with periodic updates
         run: |
-          echo "=== Screenshots Summary ==="
-          echo "Directory: $SCREENSHOT_DIR"
+          echo "=== System is ready for remote access ==="
+          echo ""
+          echo "✅ VNC/ARD Enabled"
+          echo "   Password: myvncpassword"
+          echo "   Port: 5900"
+          echo ""
+          echo "✅ Tailscale VPN Active"
+          echo "   Use 'tailscale ip' output to connect"
+          echo ""
+          echo "✅ RustDesk Running"
+          echo "   ID should be displayed in RustDesk window"
+          echo ""
+          echo "=== Keeping system alive ==="
+          echo "This workflow will run for 6 hours (until timeout)"
+          echo "System is now accessible remotely"
+          echo ""
+          echo "Current time: $(date)"
+          echo "Will run until: $(date -v+6H)"
           echo ""
           
-          if [ -d "$SCREENSHOT_DIR" ]; then
-            total_files=$(find "$SCREENSHOT_DIR" -type f -name "*.png" | wc -l)
-            echo "Total PNG files: $total_files"
+          # Display connection info periodically
+          counter=0
+          while true; do
+            counter=$((counter + 1))
+            minutes=$((counter * 5))
             
             echo ""
-            echo "File list:"
-            ls -la "$SCREENSHOT_DIR/"*.png 2>/dev/null || echo "No PNG files found"
+            echo "=== Status Update (${minutes} minutes elapsed) ==="
+            echo "Time: $(date)"
             
+            # Check services
             echo ""
-            echo "File sizes:"
-            for file in "$SCREENSHOT_DIR"/*.png; do
-              if [ -f "$file" ]; then
-                size=$(ls -lh "$file" | awk '{print $5}')
-                echo "  $(basename "$file"): $size"
-              fi
-            done
-          else
-            echo "ERROR: Screenshots directory not found!"
-          fi
+            echo "Service Status:"
+            
+            # Check VNC
+            if sudo lsof -i :5900 &>/dev/null; then
+              echo "  ✅ VNC: Listening on port 5900"
+            else
+              echo "  ❌ VNC: Not listening"
+            fi
+            
+            # Check Tailscale
+            if tailscale status &>/dev/null; then
+              echo "  ✅ Tailscale: Connected"
+              TAILSCALE_IP=$(tailscale ip 2>/dev/null || echo "Unknown")
+              echo "      IP: $TAILSCALE_IP"
+            else
+              echo "  ❌ Tailscale: Not connected"
+            fi
+            
+            # Check RustDesk
+            if pgrep -f "RustDesk" &>/dev/null; then
+              echo "  ✅ RustDesk: Running"
+            else
+              echo "  ❌ RustDesk: Not running, restarting..."
+              open -a /Applications/RustDesk.app 2>/dev/null || true
+            fi
+            
+            # Take periodic screenshot
+            if [ $((counter % 12)) -eq 0 ]; then # Every hour
+              timestamp=$(date +%Y%m%d_%H%M%S)
+              periodic_file="$SCREENSHOT_DIR/periodic_${timestamp}.png"
+              screencapture -x "$periodic_file" 2>/dev/null || true
+              echo "  📸 Periodic screenshot saved"
+            fi
+            
+            # Sleep for 5 minutes
+            echo ""
+            echo "Next update in 5 minutes..."
+            sleep 300
+          done
 
-      - name: Upload screenshots as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-settings-screenshots
-          path: |
-            ${{ env.SCREENSHOT_DIR }}
-            !${{ env.SCREENSHOT_DIR }}/.DS_Store
-          retention-days: 7
-          if-no-files-found: error
-          compression-level: 6
-
-      - name: Upload UI structure as separate artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: macos-ui-debug-info
-          path: |
-            ${{ env.SCREENSHOT_DIR }}/ui_structure.txt
-            ${{ env.SCREENSHOT_DIR }}/descriptions.txt
-          retention-days: 7
-
-      - name: Cleanup
+      - name: Final cleanup
         if: always()
         run: |
-          echo "Cleaning up..."
-          # Close System Settings
-          osascript -e 'tell application "System Settings" to quit' 2>/dev/null || true
-          osascript -e 'tell application "System Preferences" to quit' 2>/dev/null || true
+          echo "=== Final Cleanup ==="
+          echo "Stopping services..."
           
-          # Summary
-          if [ -d "$SCREENSHOT_DIR" ]; then
-            screenshot_count=$(find "$SCREENSHOT_DIR" -name "*.png" -type f | wc -l)
-            echo "Total screenshots captured: $screenshot_count"
-          fi
+          # Stop RustDesk
+          pkill -f "RustDesk" 2>/dev/null || true
           
-          echo "Workflow completed!"
+          # Disconnect Tailscale
+          sudo tailscale down 2>/dev/null || true
+          
+          # Stop VNC/ARD
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -deactivate -configure -access -off 2>/dev/null || true
+          
+          echo "✅ Cleanup complete"

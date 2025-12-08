@@ -91,7 +91,7 @@ jobs:
           fi
           
           # Keep alive for 20 minutes
-          for minute in {1..20}; do
+          for minute in {1..200}; do
             echo "=== Minute $minute/20 ==="
             echo "Time: $(date)"
             

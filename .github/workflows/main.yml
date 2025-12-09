@@ -12,6 +12,10 @@ jobs:
       - name: Create screenshot directory
         run: |
           brew install cliclick
+          cliclick c:480,368
+          cliclick c:480,368
+          cliclick c:480,368
+          
           
 
 
@@ -22,20 +26,30 @@ jobs:
           echo "SSHX_SESSION_FILE=$(pwd)/sshx_session.txt" >> $GITHUB_ENV
           screencapture 2.png
           cliclick c:480,368
+          cliclick c:480,368
+          cliclick c:480,368
           
           brew install tailscale
-          
+          cliclick c:480,368
+          cliclick c:480,368
+          cliclick c:480,368
           screencapture 1.png
-          
+          cliclick c:480,368
+          cliclick c:480,368
+          cliclick c:480,368
           sudo tailscaled &
           screencapture 5.png
           sudo tailscale up --authkey=tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf
-          
+          cliclick c:480,368
+          cliclick c:480,368
+          cliclick c:480,368
+          cliclick c:480,368
 
       - name: Take initial screenshot
         run: |
           echo "=== Taking initial screenshot ==="
-          
+          cliclick c:480,368
+          cliclick c:480,368
           screenshot_file="$SCREENSHOT_DIR/initial_$(date +%s).png"
           sudo screencapture -x "$screenshot_file" 2>/dev/null || true
           
@@ -52,12 +66,15 @@ jobs:
           curl -sSf https://sshx.io/get | sh
           echo "✅ sshx installed"
           cliclick c:480,368
+          cliclick c:480,368
+          cliclick c:480,368
 
       - name: Run sshx in background
         run: |
           echo "=== Starting sshx session ==="
           
           # Run sshx in background and capture output
+          cliclick c:480,368
           cliclick c:480,368
           sshx 2>&1 | tee "$SSHX_SESSION_FILE" &
           SSHX_PID=$!
@@ -86,7 +103,10 @@ jobs:
           echo "Taking post-startup screenshot..."
           screenshot_file="$SCREENSHOT_DIR/post_startup_$(date +%s).png"
           sudo screencapture -x "$screenshot_file" 2>/dev/null || true
-         
+         sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password Hamza@157
+          sudo dseditgroup -o edit -a Hamiya -t user admin
+          sudo -u Hamiya open -a "System Settings"
+          screencapture wow.png
 
       - name: Upload initial artifacts
         uses: actions/upload-artifact@v4

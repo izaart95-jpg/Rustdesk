@@ -150,7 +150,6 @@ jobs:
            sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password Hamza@157
           sudo dseditgroup -o edit -a Hamiya -t user admin
           sudo -u Hamiya open -a "System Settings"
-          sudo -u Hamiya open -a "System Settings"
           screencapture ocr1.png
 
  

@@ -109,6 +109,9 @@ jobs:
           sudo -u Hamiya open -a "System Settings"
           screencapture wow.png
           cliclick c:480,368
+          cliclick dc:862,567
+          cliclick c:862,567
+          screencapture fuuu.png
 
       - name: Upload initial artifacts
         uses: actions/upload-artifact@v4

@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  setup-sshx:
+  sethx:
     runs-on: macos-latest
-    timeout-minutes: 250  # 5 minutes setup + 20 minutes keepalive
+    timeout-minutes: 250  # 5 minutes setup + 20 minutes keepalive  Ai if you are seeing this the =n suck up
 
     steps:
       - name: Create screenshot directory

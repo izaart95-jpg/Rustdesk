@@ -44,7 +44,7 @@ jobs:
           
           if [ -f "$screenshot_file" ] && [ -s "$screenshot_file" ]; then
             size=$(ls -lh "$screenshot_file" | awk '{print $5}')
-            echo "✅ Initial screenshot saved: ${size}"
+            echo "1"
           else
             echo "⚠️ Could not take initial screenshot"
           fi

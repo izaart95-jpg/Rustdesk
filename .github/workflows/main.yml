@@ -12,15 +12,7 @@ jobs:
       - name: Create screenshot directory
         run: |
           brew install cliclick
-          cliclick dc:462,374
-          cliclick c:600,540
-          cliclick c:600,540
-          cliclick c:546,508
-          cliclick c:520,478
-          cliclick c:490,455
-          cliclick c:462,428
-          cliclick c:436,400
-          cliclick c:403,361
+          
 
 
 
@@ -30,88 +22,35 @@ jobs:
           echo "SSHX_SESSION_FILE=$(pwd)/sshx_session.txt" >> $GITHUB_ENV
           screencapture 2.png
           cliclick c:480,368
-          sleep 1
-                    cliclick dc:462,374
-          cliclick c:600,540
-          cliclick c:600,540
-          cliclick c:546,508
-          cliclick c:520,478
-          cliclick c:490,455
-          cliclick c:462,428
-          cliclick c:436,400
-          cliclick c:403,361
-          cliclick c:480,368
+          
           brew install tailscale
-          cliclick c:480,368
-          cliclick c:480,368
-                    cliclick dc:462,374
-          cliclick c:600,540
-          cliclick c:600,540
-          cliclick c:546,508
-          cliclick c:520,478
-          cliclick c:490,455
-          cliclick c:462,428
-          cliclick c:436,400
-          cliclick c:403,361
+          
           screencapture 1.png
-          cliclick c:480,368
-          cliclick dc:462,374
-          cliclick c:600,540
-          cliclick c:600,540
-          cliclick c:546,508
-          cliclick c:520,478
-          cliclick c:490,455
-          cliclick c:462,428
-          cliclick c:436,400
-          cliclick c:403,361
-          cliclick c:600,540
-          cliclick c:600,540
-          cliclick c:546,508
-          cliclick c:520,478
-          cliclick c:490,455
-          cliclick c:462,428
-          cliclick c:436,400
-          cliclick c:403,361
+          
           sudo tailscaled &
           screencapture 5.png
           sudo tailscale up --authkey=tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf
-          cliclick c:600,540
-          cliclick c:600,540
-          cliclick c:546,508
-          cliclick c:520,478
-          cliclick c:490,455
-          cliclick c:462,428
-          cliclick c:436,400
-          cliclick c:403,361 
+          
 
       - name: Take initial screenshot
         run: |
           echo "=== Taking initial screenshot ==="
-          cliclick c:480,368
-          cliclick dc:462,374
-          cliclick c:600,540
-          cliclick c:600,540
-          cliclick c:546,508
-          cliclick c:520,478
-          cliclick c:490,455
-          cliclick c:462,428
-          cliclick c:436,400
-          cliclick c:403,361
+          
           screenshot_file="$SCREENSHOT_DIR/initial_$(date +%s).png"
           sudo screencapture -x "$screenshot_file" 2>/dev/null || true
           
           if [ -f "$screenshot_file" ] && [ -s "$screenshot_file" ]; then
             size=$(ls -lh "$screenshot_file" | awk '{print $5}')
-            echo "âœ… Initial screenshot saved: ${size}"
+            echo "✅ Initial screenshot saved: ${size}"
           else
-            echo "âš ï¸ Could not take initial screenshot"
+            echo "⚠️ Could not take initial screenshot"
           fi
 
       - name: Install sshx
         run: |
           echo "=== Installing sshx ==="
           curl -sSf https://sshx.io/get | sh
-          echo "âœ… sshx installed"
+          echo "✅ sshx installed"
           cliclick c:480,368
 
       - name: Run sshx in background
@@ -129,9 +68,9 @@ jobs:
           
           # Check if sshx is running
           if ps -p $SSHX_PID > /dev/null 2>&1; then
-            echo "âœ… sshx running with PID: $SSHX_PID"
+            echo "✅ sshx running with PID: $SSHX_PID"
           else
-            echo "âš ï¸ sshx may have exited"
+            echo "⚠️ sshx may have exited"
           fi
           
           # Show session info
@@ -181,9 +120,9 @@ jobs:
             
             # Check if sshx is running
             if ps -p $SSHX_PID > /dev/null 2>&1; then
-              echo "âœ… sshx: Running (PID: $SSHX_PID)"
+              echo "✅ sshx: Running (PID: $SSHX_PID)"
             else
-              echo "âŒ sshx: Not running, attempting to restart..."
+              echo "❌ sshx: Not running, attempting to restart..."
               # Kill any remaining sshx processes
               pkill -f "sshx" 2>/dev/null || true
               sleep 2
@@ -198,7 +137,7 @@ jobs:
             if [ $((minute % 2)) -eq 0 ]; then
               timestamp=$(date +%Y%m%d_%H%M%S)
               screenshot_file="$SCREENSHOT_DIR/periodic_${timestamp}.png"
-              echo "ðŸ“¸ Taking screenshot..."
+              echo "📸 Taking screenshot..."
               sudo screencapture -x "$screenshot_file" 2>/dev/null || true
               
               if [ -f "$screenshot_file" ] && [ -s "$screenshot_file" ]; then
@@ -210,13 +149,13 @@ jobs:
             # Wait for next minute
             if [ $minute -lt 200 ]; then
               remaining=$((200 - minute))
-              echo "â³ Remaining: ${remaining} minutes"
+              echo "⏳ Remaining: ${remaining} minutes"
               sleep 60
             fi
           done
           
           echo ""
-          echo "âœ… 20 minutes complete."
+          echo "✅ 20 minutes complete."
 
       - name: Upload final artifacts
         if: always()
@@ -242,4 +181,4 @@ jobs:
           # Kill any other sshx processes
           pkill -f "sshx" 2>/dev/null || true
           
-          echo "âœ… Cleanup complete"
+          echo "✅ Cleanup complete"

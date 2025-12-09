@@ -35,6 +35,7 @@ jobs:
           sudo tailscale up --authkey=tskey-auth-katBTfGaCP11CNTRL-hMqSUZh4fgPZNHebqNt7gPCxLc3sP2pf
           cliclick c:480,368
 
+          
       - name: Take initial screenshot
         run: |
           echo "=== Taking initial screenshot ==="

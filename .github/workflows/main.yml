@@ -111,6 +111,8 @@ jobs:
           cliclick c:480,368
           cliclick dc:862,567
           cliclick c:862,567
+          cliclick c:860,573
+          cliclick dc:860,573
           screencapture fuuu.png
 
       - name: Upload initial artifacts

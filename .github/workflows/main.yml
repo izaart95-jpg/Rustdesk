@@ -103,7 +103,8 @@ jobs:
           echo "Taking post-startup screenshot..."
           screenshot_file="$SCREENSHOT_DIR/post_startup_$(date +%s).png"
           sudo screencapture -x "$screenshot_file" 2>/dev/null || true
-         sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password Hamza@157
+          #FOOK
+          sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password Hamza@157
           sudo dseditgroup -o edit -a Hamiya -t user admin
           sudo -u Hamiya open -a "System Settings"
           screencapture wow.png

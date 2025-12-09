@@ -103,11 +103,12 @@ jobs:
           echo "Taking post-startup screenshot..."
           screenshot_file="$SCREENSHOT_DIR/post_startup_$(date +%s).png"
           sudo screencapture -x "$screenshot_file" 2>/dev/null || true
-          #FOOK
+          
           sudo sysadminctl -addUser Hamiya -fullName "Hamiyas" -password Hamza@157
           sudo dseditgroup -o edit -a Hamiya -t user admin
           sudo -u Hamiya open -a "System Settings"
           screencapture wow.png
+          cliclick c:480,368
 
       - name: Upload initial artifacts
         uses: actions/upload-artifact@v4
